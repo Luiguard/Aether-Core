@@ -21,3 +21,4 @@ checkpoints/
 # Aether Symbolic Graph Persistenz
 aether_core/data/*.json
 training_data.json
+config.yaml

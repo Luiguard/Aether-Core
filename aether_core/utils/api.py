@@ -408,9 +408,9 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
             )
         ],
         usage=ChatCompletionUsage(
-            prompt_tokens=len(prompt_ids[0]),
+            prompt_tokens=len(prompt_ids),
             completion_tokens=completion_tokens,
-            total_tokens=len(prompt_ids[0]) + completion_tokens,
+            total_tokens=len(prompt_ids) + completion_tokens,
             tokens_per_second=round(tokens_per_second, 2),
             elapsed_ms=round(elapsed * 1000, 2),
         ),

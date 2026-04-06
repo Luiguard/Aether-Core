@@ -67,25 +67,53 @@ Achte unbedingt darauf, dass keine Strings innerhalb des JSONs nicht geschlossen
         
     def _parse_and_validate(self, raw_response: str) -> Optional[ExtractedKnowledge]:
         """Tries to extract JSON and validate it against the Pydantic schema."""
+        import re as _re
         try:
             # Versuche Markdown-JSON-Blöcke zu parsen
             if "```json" in raw_response:
                 start = raw_response.find("```json") + 7
                 end = raw_response.rfind("```")
+                if end <= start:
+                    end = len(raw_response)
             else:
                 start = raw_response.find("{")
                 end = raw_response.rfind("}") + 1
             
             if start >= 0 and end > start:
                 json_str = raw_response[start:end].strip()
+                
+                # Sanitize: Trailing commas (häufig bei truncated LLM output)
+                json_str = _re.sub(r',\s*}', '}', json_str)
+                json_str = _re.sub(r',\s*]', ']', json_str)
+                
+                # Repair: Truncated JSON — versuche offene Klammern zu schließen
+                open_braces = json_str.count('{') - json_str.count('}')
+                open_brackets = json_str.count('[') - json_str.count(']')
+                if open_braces > 0 or open_brackets > 0:
+                    # Abschneiden bis zum letzten vollständigen Objekt
+                    last_complete = max(json_str.rfind('}'), json_str.rfind(']'))
+                    if last_complete > 0:
+                        json_str = json_str[:last_complete + 1]
+                        # Klammern erneut zählen und schließen
+                        open_braces = json_str.count('{') - json_str.count('}')
+                        open_brackets = json_str.count('[') - json_str.count(']')
+                    json_str += '}' * max(0, open_braces)
+                    json_str += ']' * max(0, open_brackets)
+                    # Nochmal trailing commas bereinigen
+                    json_str = _re.sub(r',\s*}', '}', json_str)
+                    json_str = _re.sub(r',\s*]', ']', json_str)
+                
                 data = json.loads(json_str)
                 return ExtractedKnowledge(**data)
             
             print("[Integrator] Konnte keine gültigen JSON-Grenzen finden.")
             return None
-        except (json.JSONDecodeError, ValidationError) as e:
+        except json.JSONDecodeError as e:
+            print(f"[Integrator] JSON Parse Error: {e}")
+            print(f"[Integrator] Raw Output Snippet: {raw_response[:200]} ... {raw_response[-200:]}")
+            return None
+        except ValidationError as e:
             print(f"[Integrator] Validation Error: {e}")
-            # Bei Längen-Überschreitungen oder unvollständigem JSON durch max_tokens Limit
             print(f"[Integrator] Raw Output Snippet: {raw_response[:200]} ... {raw_response[-200:]}")
             return None
 
@@ -121,34 +149,56 @@ Achte unbedingt darauf, dass keine Strings innerhalb des JSONs nicht geschlossen
 
     def _generate_training_pairs(self, topic: str, context: str):
         """Erzeugt aus dem Graphen-Wissen Dialoge für die Sprach-Engine."""
+        import os as _os  # Defensiver lokaler Import (verhindert Shadowing-Probleme)
+        import re as _re
         print(f"[Integrator] Synthetisiere Trainings-Dialoge für '{topic}'...")
-        prompt = f"""Basierend auf diesen Fakten: {context[:2000]}
-Erzeuge 5 kurze, natürliche Frage-Antwort-Paare (User/Assistant) für das Training eines LLMs.
+        prompt = f"""Basierend auf diesen Fakten: {context[:3000]}
+Erzeuge 10 diverse, natürliche Frage-Antwort-Paare (User/Assistant) für das Training eines LLMs.
+Variiere die Fragetypen: Was-ist, Wie-funktioniert, Warum, Vergleiche, Beispiele, Vor-/Nachteile.
 Gib NUR ein JSON-Array zurück: [{{"question": "...", "answer": "..."}}]"""
         
         try:
-            res = self.teacher._call([{"role": "user", "content": prompt}], temperature=0.7)
+            res = self.teacher._call([{"role": "user", "content": prompt}], temperature=0.7, max_tokens=4096)
+            if not res:
+                print("[Integrator] Leere Antwort von Teacher API.")
+                return
             start = res.find("[")
             end = res.rfind("]") + 1
-            if start >= 0:
-                new_pairs = json.loads(res[start:end])
+            if start >= 0 and end > start:
+                json_str = res[start:end]
+                # Sanitize: Trailing commas vor ] entfernen (häufig bei truncated output)
+                json_str = _re.sub(r',\s*]', ']', json_str)
+                json_str = _re.sub(r',\s*}', '}', json_str)
+                new_pairs = json.loads(json_str)
+                
+                # Nur valide Paare behalten
+                new_pairs = [p for p in new_pairs if isinstance(p, dict) and "question" in p and "answer" in p]
+                if not new_pairs:
+                    print("[Integrator] Keine validen QA-Paare im Output.")
+                    return
                 
                 # An training_data.json anhängen
                 path = "aether_core/data/training_data.json"
                 existing = []
-                if os.path.exists(path):
-                    with open(path, "r", encoding="utf-8") as f:
-                        existing = json.load(f)
+                if _os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as fh:
+                        existing = json.load(fh)
                 
                 existing.extend(new_pairs)
                 # Limit auf 1000 Paare um Überhitzung zu vermeiden
                 if len(existing) > 1000: existing = existing[-1000:]
                 
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(existing, f, indent=2, ensure_ascii=False)
+                # Verzeichnis sicherstellen
+                _os.makedirs(_os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(existing, fh, indent=2, ensure_ascii=False)
                 print(f"[Integrator] {len(new_pairs)} neue Trainings-Paare hinzugefügt (Gesamt: {len(existing)}).")
+            else:
+                print("[Integrator] Kein JSON-Array in Teacher-Antwort gefunden.")
+        except json.JSONDecodeError as e:
+            print(f"[Integrator] JSON-Parse-Fehler bei Dialog-Synthese: {e}")
         except Exception as e:
-            print(f"[Integrator] Fehler bei Dialog-Synthese: {e}")
+            print(f"[Integrator] Fehler bei Dialog-Synthese: {type(e).__name__}: {e}")
         
     def _write_to_memory(self, k: ExtractedKnowledge):
         """Schreibt validierte Items in die lokale Aether-Core API."""

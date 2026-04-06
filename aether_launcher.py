@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 import threading
 import webbrowser
 import time
@@ -45,8 +46,9 @@ def start_web_server():
     httpd.serve_forever()
 
 def start_continuous_distiller():
-    """Überwacht den Datensatz und startet Training bei neuem Wissen."""
-    print("[Distiller] Unendlicher Lernmodus aktiv (Auto-Distill).")
+    """Überwacht den Datensatz und startet Training bei neuem Wissen via API."""
+    import requests
+    print("[Distiller] Unendlicher Lernmodus aktiv (Auto-Distill via API).")
     data_path = "aether_core/data/training_data.json"
     last_size = 0
     if os.path.exists(data_path):
@@ -57,12 +59,16 @@ def start_continuous_distiller():
             if os.path.exists(data_path):
                 current_size = os.path.getsize(data_path)
                 if current_size > last_size:
-                    print(f"\n[Distiller] Neues Wissen erkannt ({current_size} Bytes). Starte Distillation...")
-                    subprocess.run(["python", "distill.py", "20"], check=False)
-                    last_size = current_size
+                    print(f"\n[Distiller] Neues Wissen erkannt ({current_size} Bytes). Sende Trainings-Request an API...")
+                    # Anstelle eines rohen Subprozesses nutzen wir die API, um Race Conditions (Zwei Trainings parallel) zu vermeiden.
+                    res = requests.post("http://127.0.0.1:8444/v1/train/distill", json={"epochs": 20}, timeout=5)
+                    if res.status_code == 200 and res.json().get("status") == "success":
+                        print("[Distiller] API hat Training akzeptiert.")
+                        last_size = current_size
+                    else:
+                        print(f"[Distiller] API lehnte Training ab (läuft eventuell schon): {res.text}")
             time.sleep(30) # Alle 30 Sekunden prüfen
         except Exception as e:
-            print(f"[Distiller] Fehler: {e}")
             time.sleep(10)
 
 def start_auto_agent():

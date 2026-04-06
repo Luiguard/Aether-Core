@@ -32,9 +32,23 @@ class SymbolicMemory:
 
     # API-Learning Methoden
     def add_node(self, node_id: str, name: str, properties: Dict[str, Any]) -> bool:
-        """Legt einen neuen Wissensknoten an."""
+        """Legt einen neuen Wissensknoten an oder aktualisiert einen existierenden."""
         if node_id in self.graph["nodes"]:
-            return False # Konflikt: Existiert bereits
+            # MERGE: Existierenden Node mit neuen Properties anreichern
+            existing = self.graph["nodes"][node_id]
+            for k, v in properties.items():
+                if k == "_ts":
+                    # Timestamp immer aktualisieren
+                    existing["properties"][k] = v
+                elif k.startswith("_"):
+                    # Interne Felder überschreiben
+                    existing["properties"][k] = v
+                elif k not in existing["properties"]:
+                    # Nur neue Fakten hinzufügen, bestehende nicht überschreiben
+                    existing["properties"][k] = v
+            self.save_graph()
+            return True  # Merge erfolgreich
+        
         self.graph["nodes"][node_id] = {
             "name": name,
             "properties": properties,
@@ -44,10 +58,31 @@ class SymbolicMemory:
         return True
 
     def add_edge(self, source_id: str, target_id: str, relation_type: str) -> bool:
-        """Legt eine Relation zwischen zwei Knoten an."""
-        if source_id not in self.graph["nodes"] or target_id not in self.graph["nodes"]:
-            return False # Einer der Knoten fehlt
-        self.graph["nodes"][source_id]["relations"].append({
+        """Legt eine Relation zwischen zwei Knoten an (dedupliziert und erzeugt Missing Nodes)."""
+        # Wenn ein Knoten fehlt, erzeugen wir ihn als leeren Platzhalter!
+        # Der Gap Detector wird ihn später als Lücke identifizieren und füllen.
+        import time
+        now = int(time.time())
+        if source_id not in self.graph["nodes"]:
+            self.graph["nodes"][source_id] = {
+                "name": source_id, 
+                "properties": {"_ts": now, "_source": "auto-placeholder"}, 
+                "relations": []
+            }
+        if target_id not in self.graph["nodes"]:
+            self.graph["nodes"][target_id] = {
+                "name": target_id, 
+                "properties": {"_ts": now, "_source": "auto-placeholder"}, 
+                "relations": []
+            }
+            
+        # Deduplizierung: Prüfe ob exakte Relation bereits existiert
+        existing_rels = self.graph["nodes"][source_id]["relations"]
+        for rel in existing_rels:
+            if rel["target"] == target_id and rel["type"] == relation_type:
+                return True  # Bereits vorhanden, kein Duplikat anlegen
+        
+        existing_rels.append({
             "target": target_id,
             "type": relation_type
         })
@@ -55,7 +90,7 @@ class SymbolicMemory:
         return True
 
     def add_fact(self, node_id: str, key: str, value: Any) -> bool:
-        """Speichert einen Fakt als Attribut eines Knotens."""
+        """Speichert einen Fakt als Attribut eines Knotens (upsert)."""
         if node_id not in self.graph["nodes"]:
             return False
         self.graph["nodes"][node_id]["properties"][key] = value
