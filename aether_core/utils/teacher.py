@@ -25,8 +25,9 @@ class TeacherClient:
 
     def _call(self, messages: List[Dict[str, str]], temperature: float = 0.7, max_tokens: int = 512) -> str:
         """Sendet eine Anfrage an die DeepSeek API."""
+        current_key = os.environ.get("AETHER_TEACHER_API_KEY", self.api_key)
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {current_key}",
             "Content-Type": "application/json",
         }
         payload = {
