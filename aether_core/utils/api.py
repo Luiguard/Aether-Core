@@ -217,9 +217,26 @@ class APIKeyIn(BaseModel):
 
 @app.post("/v1/settings/apikey")
 async def set_api_key(data: APIKeyIn):
-    import os
-    os.environ["AETHER_TEACHER_API_KEY"] = data.api_key
-    return {"status": "success", "message": "API Key gespeichert."}
+    """Speichert den API-Key permanent in der config.yaml."""
+    import yaml
+    try:
+        with open("config.yaml", "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        
+        # Sektion sicherstellen
+        if "teacher" not in cfg:
+            cfg["teacher"] = {}
+            
+        cfg["teacher"]["api_key"] = data.api_key
+        with open("config.yaml", "w", encoding="utf-8") as f:
+            yaml.dump(cfg, f, default_flow_style=False)
+            
+        # Globalen Zustand aktualisieren
+        os.environ["AETHER_TEACHER_API_KEY"] = data.api_key
+        print(f"[Aether-API] Teacher API-Key permanent in config.yaml gespeichert.")
+        return {"status": "success", "message": "API Key permanent gespeichert."}
+    except Exception as e:
+        return {"status": "error", "message": f"Konnte Key nicht speichern: {e}"}
 
 class TrainRequest(BaseModel):
     epochs: int
@@ -342,7 +359,7 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
     elapsed = max(end_gen - start_gen, 0.001)
 
     # 5. Nur die neuen Tokens decodieren
-    new_ids = generated_ids[len(prompt_ids[0]):]
+    new_ids = generated_ids[len(prompt_ids):]
     completion_tokens = len(new_ids)
     response_text = tokenizer.decode(new_ids).strip()
     

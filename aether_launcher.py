@@ -44,6 +44,27 @@ def start_web_server():
     httpd = HTTPServer(server_address, handler)
     httpd.serve_forever()
 
+def start_continuous_distiller():
+    """Überwacht den Datensatz und startet Training bei neuem Wissen."""
+    print("[Distiller] Unendlicher Lernmodus aktiv (Auto-Distill).")
+    data_path = "aether_core/data/training_data.json"
+    last_size = 0
+    if os.path.exists(data_path):
+        last_size = os.path.getsize(data_path)
+    
+    while True:
+        try:
+            if os.path.exists(data_path):
+                current_size = os.path.getsize(data_path)
+                if current_size > last_size:
+                    print(f"\n[Distiller] Neues Wissen erkannt ({current_size} Bytes). Starte Distillation...")
+                    subprocess.run(["python", "distill.py", "20"], check=False)
+                    last_size = current_size
+            time.sleep(30) # Alle 30 Sekunden prüfen
+        except Exception as e:
+            print(f"[Distiller] Fehler: {e}")
+            time.sleep(10)
+
 def start_auto_agent():
     try:
         from aether_core.utils.autonomous_agent import AutonomousAgent
@@ -74,6 +95,10 @@ if __name__ == "__main__":
     time.sleep(4)
     agent_thread = threading.Thread(target=start_auto_agent, daemon=True)
     agent_thread.start()
+    
+    # 4b. Continuous Distiller
+    distiller_thread = threading.Thread(target=start_continuous_distiller, daemon=True)
+    distiller_thread.start()
     
     print("[5/5] Öffne Browser...")
     time.sleep(2) # Kurz warten, damit alles bootet

@@ -38,6 +38,8 @@ symbolic:
   graph_path: aether_core/data/ki_architektur.json
   safe_mode: true
   use_rules: true
+teacher:
+  api_key: sk-d428cc62dc3b40bcb4e7ee6ab9d0f377
 training:
   batch_size: 16
   epochs: 5

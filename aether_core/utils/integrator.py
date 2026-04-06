@@ -5,6 +5,7 @@ Extrahiert strukturiertes Wissen über die API und iteriert es direkt in den Gra
 import json
 import time
 import hashlib
+import os
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, ValidationError
 
@@ -112,7 +113,42 @@ Achte unbedingt darauf, dass keine Strings innerhalb des JSONs nicht geschlossen
         # 3. Store in Memory via REST API
         print(f"[Integrator] Validiert: {len(knowledge.nodes)} Nodes, {len(knowledge.edges)} Edges.")
         self._write_to_memory(knowledge)
+        
+        # 4. Neural-Sync: Generiere Trainings-Dialoge für die Distillation
+        self._generate_training_pairs(topic, raw_response)
+        
         return True
+
+    def _generate_training_pairs(self, topic: str, context: str):
+        """Erzeugt aus dem Graphen-Wissen Dialoge für die Sprach-Engine."""
+        print(f"[Integrator] Synthetisiere Trainings-Dialoge für '{topic}'...")
+        prompt = f"""Basierend auf diesen Fakten: {context[:2000]}
+Erzeuge 5 kurze, natürliche Frage-Antwort-Paare (User/Assistant) für das Training eines LLMs.
+Gib NUR ein JSON-Array zurück: [{{"question": "...", "answer": "..."}}]"""
+        
+        try:
+            res = self.teacher._call([{"role": "user", "content": prompt}], temperature=0.7)
+            start = res.find("[")
+            end = res.rfind("]") + 1
+            if start >= 0:
+                new_pairs = json.loads(res[start:end])
+                
+                # An training_data.json anhängen
+                path = "aether_core/data/training_data.json"
+                existing = []
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                
+                existing.extend(new_pairs)
+                # Limit auf 1000 Paare um Überhitzung zu vermeiden
+                if len(existing) > 1000: existing = existing[-1000:]
+                
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(existing, f, indent=2, ensure_ascii=False)
+                print(f"[Integrator] {len(new_pairs)} neue Trainings-Paare hinzugefügt (Gesamt: {len(existing)}).")
+        except Exception as e:
+            print(f"[Integrator] Fehler bei Dialog-Synthese: {e}")
         
     def _write_to_memory(self, k: ExtractedKnowledge):
         """Schreibt validierte Items in die lokale Aether-Core API."""

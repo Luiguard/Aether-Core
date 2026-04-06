@@ -1,30 +1,34 @@
 @echo off
-title Aether-Core Distillation Trainer
-color 0D
-echo ==============================================================
-echo                 AETHER-CORE KNOWLEDGE DISTILLATION
+setlocal
+cls
+title Aether-Core Knowledge Distillation
+
 echo ==============================================================
 echo.
-echo Dieses Programm trainiert das lokale neuronale Modell,
-echo indem es Wissen (Sprachmuster und Fakten) vom DeepSeek-Teacher "destilliert".
+echo           A E T H E R - C O R E   -   T R A I N E R
+echo.
+echo ==============================================================
+echo.
+echo Dieses Programm trainiert das lokale neuronale Modell.
+echo Wissen wird vom DeepSeek-Teacher "destilliert".
 echo.
 
-:: Prüfe ob API_KEY vorhanden ist, falls nicht, frage danach
+:: Die API-Key Abfrage ist nun im UI moeglich, 
+:: aber fuer manuelle Runs hier als Noob-Sicherheit.
 if "%AETHER_TEACHER_API_KEY%"=="" (
-    echo [HINWEIS] Es ist kein API-Key gefunden worden. 
-    echo Ohne DeepSeek-R2 nutzt Aether nur Dummy-Saetze zum Training!
-    set /p AETHER_TEACHER_API_KEY="Bitte DeepSeek API-Key eingeben (oder Enter fuer Offline-Modus): "
+    echo [HINWEIS] Es ist kein API-Key in der Sitzung gefunden worden. 
+    echo Ohne KEY nutzt Aether nur den Dummy-Modus!
+    echo (Du kannst den Key auch permanent im Browser-Dashboard speichern!)
+    echo.
 )
 
-echo.
-set /p EPOCHS="Wie viele Epochen moechtest du trainieren? (Zahl eingeben, z.B. 60 oder 100): "
+set /p EPOCHS="Wie viele Epochen moechtest du trainieren? (Default: 60): "
 if "%EPOCHS%"=="" set EPOCHS=60
 
 echo.
-echo ==============================================================
 echo Starte Destillation fuer %EPOCHS% Epochen... 
-echo ==============================================================
-python distill.py --config config.yaml --epochs %EPOCHS%
+echo.
+python distill.py %EPOCHS%
 
 echo.
 echo Training abgeschlossen. Du kannst nun das Dashboard wieder oeffnen!
