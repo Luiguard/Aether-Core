@@ -137,7 +137,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str = "aether-core"
     messages: List[ChatMessage]
-    max_tokens: int = 128
+    max_tokens: int = 512
     temperature: float = 0.3
     top_k: int = 10
     stream: bool = False
