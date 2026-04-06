@@ -25,6 +25,37 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Aether-Core OpenAI-Compatible API", version="1.0.0")
 
+LAST_INTERACTION_TIME = time.time()
+IS_TRAINING = False
+
+def run_distill_safe(epochs=20):
+    global IS_TRAINING, LAST_INTERACTION_TIME
+    if IS_TRAINING: return
+    IS_TRAINING = True
+    try:
+        import sys
+        sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+        from distill import distill
+        distill("config.yaml", epochs)
+    except Exception as e:
+        print(f"[Training] Fehler: {e}")
+    finally:
+        IS_TRAINING = False
+        LAST_INTERACTION_TIME = time.time()
+
+@app.on_event("startup")
+async def start_idle_observer():
+    asyncio.create_task(idle_loop())
+
+async def idle_loop():
+    from fastapi.concurrency import run_in_threadpool
+    global LAST_INTERACTION_TIME, IS_TRAINING
+    while True:
+        await asyncio.sleep(10)
+        if not IS_TRAINING and (time.time() - LAST_INTERACTION_TIME > 120):
+            print("\n[IdleObserver] 2 Minuten Leerlauf erkannt! Auto-Distill startet (60 Epochen)...")
+            await run_in_threadpool(run_distill_safe, 60)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -153,14 +184,11 @@ class TrainRequest(BaseModel):
 
 @app.post("/v1/train/distill")
 async def trigger_distill(req: TrainRequest, background_tasks: BackgroundTasks):
-    # distill import hier um cycle dependencies zu vermeiden
-    import sys
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-    from distill import distill
+    if IS_TRAINING:
+        return {"status": "error", "message": "Training läuft bereits!"}
     
-    # Führe distill als asyncio / background task aus
-    background_tasks.add_task(distill, "config.yaml", req.epochs)
-    return {"status": "success", "message": f"Training gestartet. Log siehe Konsole."}
+    background_tasks.add_task(run_distill_safe, req.epochs)
+    return {"status": "success", "message": f"Training (Epochen: {req.epochs}) gestartet. Log siehe Konsole."}
 
 # --- OpenAI-kompatible Endpunkte ---
 @app.get("/v1/models")
@@ -181,6 +209,8 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
+    global LAST_INTERACTION_TIME
+    LAST_INTERACTION_TIME = time.time()
     """
     OpenAI-kompatibles Chat-Completion Interface.
     Nimmt Messages entgegen, generiert autoregressive Antwort.
