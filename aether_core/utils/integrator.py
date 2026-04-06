@@ -63,6 +63,7 @@ Dein Return-Format MUSS exakt dieses Schema einhalten:
 }}
 
 Achte unbedingt darauf, dass keine Strings innerhalb des JSONs nicht geschlossene Quotes, Tabs, oder Zeilenumbrüche (außer escaped \\n) enthalten, damit es von Python json.loads geparst werden kann.
+WICHTIG: Verwende UNTER KEINEN UMSTÄNDEN die Abkürzung "..." um Code, Listen oder Felder auszulassen. Schreibe das JSON immer zu 100% vollständig aus. "..." ausserhalb von normalen Strings zerstört den JSON-Parser!
 """
         
     def _parse_and_validate(self, raw_response: str) -> Optional[ExtractedKnowledge]:

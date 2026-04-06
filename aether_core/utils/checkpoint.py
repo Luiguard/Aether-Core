@@ -40,6 +40,18 @@ class CheckpointManager:
 
         torch.save(state, path)
         print(f"[Checkpoint] Gespeichert: {path} (Step {step})")
+        
+        # Cleanup: Behalte maximal die 2 aktuellsten Checkpoints
+        try:
+            files = [os.path.join(self.checkpoint_dir, f) for f in os.listdir(self.checkpoint_dir) if f.endswith(".pt")]
+            if len(files) > 2:
+                # Nach Erstellungsdatum sortieren und die ältesten löschen
+                files.sort(key=os.path.getmtime)
+                for old_file in files[:-2]:
+                    os.remove(old_file)
+        except Exception as e:
+            print(f"[Checkpoint] Warnung: Konnte alte Checkpoints nicht aufräumen: {e}")
+            
         return path
 
     def load(

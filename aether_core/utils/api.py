@@ -137,7 +137,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str = "aether-core"
     messages: List[ChatMessage]
-    max_tokens: int = 256
+    max_tokens: int = 128
     temperature: float = 0.7
     top_k: int = 50
     stream: bool = False
@@ -354,6 +354,7 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
         top_k=request.top_k,
         eos_token_id=tokenizer.eos_token_id,
         context_emb=context_emb,
+        repetition_penalty=1.8,
     )
     end_gen = time.time()
     elapsed = max(end_gen - start_gen, 0.001)
