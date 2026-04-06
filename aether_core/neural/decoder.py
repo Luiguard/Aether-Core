@@ -114,6 +114,7 @@ class ChatDecoder(nn.Module):
         eos_token_id: int = 2,
         context_emb: Optional[torch.Tensor] = None,
         forbidden_tokens: Optional[List[int]] = None,
+        repetition_penalty: float = 1.2,
     ) -> List[int]:
         """
         Autoregressive Generierung: Token für Token.
@@ -132,6 +133,14 @@ class ChatDecoder(nn.Module):
             # Constraints
             if forbidden_tokens:
                 logits = self.apply_constraints(logits, forbidden_tokens)
+
+            # Repetition Penalty
+            if repetition_penalty > 1.0:
+                for token_id in set(generated[0].tolist()):
+                    if logits[0, token_id] > 0:
+                        logits[0, token_id] /= repetition_penalty
+                    else:
+                        logits[0, token_id] *= repetition_penalty
 
             # Temperature
             logits = logits / max(temperature, 1e-8)
