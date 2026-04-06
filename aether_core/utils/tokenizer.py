@@ -88,8 +88,6 @@ class AetherTokenizer:
                 break
 
             best_pair = max(pair_counts, key=pair_counts.get)
-            if pair_counts[best_pair] < 2:
-                break  # Keine sinnvollen Merges mehr
 
             # 3. Neues Token erstellen
             new_id = self.next_id
