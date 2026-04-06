@@ -20,6 +20,8 @@ from aether_core.neural.moe import SparseCore
 from aether_core.compression.engine import CompressionEngine
 from aether_core.neural.decoder import ChatDecoder
 from aether_core.utils.tokenizer import AetherTokenizer
+from aether_core.symbolic.entity_linker import EntityLinker
+from aether_core.symbolic.safety import SafetyLayer
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -69,10 +71,15 @@ config_path = "config.yaml"
 with open(config_path, "r", encoding="utf-8") as f:
     config = yaml.safe_load(f)
 
-device = torch.device(config["device"] if torch.cuda.is_available() else "cpu")
+n_cfg = config["neural"]
 
-# Module laden
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# --- Module laden ---
 sm = SymbolicMemory(config["symbolic"]["graph_path"])
+entity_linker = EntityLinker(sm)
+safety_layer = SafetyLayer(entity_linker)
+
 tokenizer = AetherTokenizer()  # Custom BPE
 
 n_cfg = config["neural"]
@@ -215,7 +222,26 @@ async def chat_completions(request: ChatCompletionRequest):
     OpenAI-kompatibles Chat-Completion Interface.
     Nimmt Messages entgegen, generiert autoregressive Antwort.
     """
-    # 1. Nachrichten zu einem Prompt zusammenbauen
+    # 1. Check Safety Rules (Pre-Processing Spec 10.1)
+    user_input_pure = " ".join(m.content for m in request.messages if m.role == "user")
+    is_safe, refusal_reason = safety_layer.pre_check(user_input_pure)
+    
+    if not is_safe:
+        return ChatCompletionResponse(
+            id=f"aether-{int(time.time())}",
+            created=int(time.time()),
+            model="aether-core",
+            choices=[
+                ChatCompletionChoice(
+                    index=0,
+                    message=ChatMessage(role="assistant", content=f"⚠️ {refusal_reason}"),
+                    finish_reason="stop",
+                )
+            ],
+            usage=ChatCompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        )
+
+    # 1b. Nachrichten zu einem Prompt zusammenbauen
     prompt_parts = []
     for msg in request.messages:
         prefix = {"system": "System", "user": "User", "assistant": "Assistant"}.get(msg.role, msg.role)
