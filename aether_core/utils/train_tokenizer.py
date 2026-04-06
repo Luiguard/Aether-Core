@@ -30,7 +30,7 @@ def collect_text(source_dir: str, extensions: tuple = (".txt", ".md")) -> str:
 def train_tokenizer(
     source_dir: str,
     output_path: str = "aether_core/data/tokenizer_merges.json",
-    num_merges: int = 8000,
+    num_merges: int = 1788,
 ):
     """
     Trainiert den BPE-Tokenizer auf allen Textdateien in source_dir.
