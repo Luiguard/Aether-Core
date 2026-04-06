@@ -20,7 +20,7 @@ def prepare_light_config():
         if "scaling" not in cfg:
             cfg["scaling"] = {}
         cfg["scaling"]["preset"] = "nano" # Nutzt nur ~100MB RAM, läuft überall
-        cfg["device"] = "cpu" # Breitenmasse hat evtl keine dicke NVIDIA GPU
+        cfg["device"] = "cuda" # Nutzt automatisch die GPU falls vorhanden, ansonsten greift der Fallback auf CPU
         
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(cfg, f, default_flow_style=False)
