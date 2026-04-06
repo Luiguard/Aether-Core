@@ -236,7 +236,34 @@ async def chat_completions(request: ChatCompletionRequest):
 
     # 5. Nur die neuen Tokens decodieren
     new_ids = generated_ids[len(prompt_ids):]
-    response_text = tokenizer.decode(new_ids)
+    response_text = tokenizer.decode(new_ids).strip()
+
+    # --- EXPERIMENTAL QUALITY CHECK (Weiteres Training nötig?) ---
+    needs_training = False
+    words = response_text.split()
+    
+    if len(words) > 4:
+        # Check 1: Zu viele Wiederholungen (Looping)
+        max_repeats, current_repeats = 1, 1
+        for i in range(1, len(words)):
+            if words[i].lower() == words[i-1].lower():
+                current_repeats += 1
+                max_repeats = max(max_repeats, current_repeats)
+            else:
+                current_repeats = 1
+        if max_repeats >= 4:
+            needs_training = True
+
+    # Check 2: Extrem lange Gibberish-Wörter ("Asernernernernern...")
+    if any(len(w) > 25 for w in words):
+        needs_training = True
+        
+    # Check 3: Leere Ausgabe (Model Collapse)
+    if not response_text:
+        needs_training = True
+
+    if needs_training:
+        response_text += "\n\n⚠️ *(System-Hinweis: Die Neural-Engine zeigt Anzeichen von Untrainiertheit (Degeneration). Bitte im Einstellungen-Zahnrad den 'Trainer starten', um die Sprachstruktur weiter zu destillieren.)*"
 
     # 6. OpenAI-kompatible Antwort bauen
     return ChatCompletionResponse(
