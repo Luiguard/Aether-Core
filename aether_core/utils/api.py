@@ -214,8 +214,19 @@ async def list_models():
     }
 
 
+def background_learn(topic: str):
+    from aether_core.utils.teacher import TeacherClient
+    from aether_core.utils.integrator import DeepSeekIntegrator
+    print(f"\n[API Background] Starte autonome Akquise für: {topic}")
+    try:
+        teacher = TeacherClient()
+        integrator = DeepSeekIntegrator(teacher, "http://127.0.0.1:8444")
+        integrator.acquire_topic(f"Details und Fakten zu: {topic}")
+    except Exception as e:
+        print(f"[API Background] Fehler: {e}")
+
 @app.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest):
+async def chat_completions(request: ChatCompletionRequest, background_tasks: BackgroundTasks):
     global LAST_INTERACTION_TIME
     LAST_INTERACTION_TIME = time.time()
     """
@@ -260,22 +271,20 @@ async def chat_completions(request: ChatCompletionRequest):
     # --- ON-DEMAND LEARNING TRIGGER ---
     if not entities and len(request.messages) > 0:
         last_msg = request.messages[-1].content
-        # Wenn wir gar kein Konzept gematcht haben, beauftragen wir den Teacher
-        # Wir rufen den DeepSeekIntegrator auf, um das Konzept strukturiert in den Graph zu pumpen
-        from aether_core.utils.teacher import TeacherClient
-        from aether_core.utils.integrator import DeepSeekIntegrator
+        print(f"[API] Lücke entdeckt für: '{last_msg}'. Beauftrage Background-Agent...")
         
-        print(f"[API] Lücke entdeckt für: '{last_msg}'. Initiiere On-Demand Teacher Learning...")
-        try:
-            # Wir extrahieren on-the-fly (synchron, da das UI lädt)
-            teacher = TeacherClient()
-            integrator = DeepSeekIntegrator(teacher, "http://127.0.0.1:8444")
-            if integrator.acquire_topic(f"Details und Fakten zu: {last_msg}"):
-                print("[API] Erfolgreich gelernt. Lade frischen Node...")
-                # Lade Graph Update manuell einmalig nach dem POST (der Integrator nutzt REST POST)
-                entities = [k for k in sm.graph.get("nodes", {}).keys() if k.lower() in all_text.lower()]
-        except Exception as e:
-            print(f"[API] Fehler beim On-Demand Learning: {e}")
+        # Feuere es asynchron ab und antworte dem Nutzer sofort.
+        background_tasks.add_task(background_learn, last_msg)
+        
+        response_text = f"Bisher fehlt mir zu '{last_msg}' leider das spezifische Wissen. Ich habe aber soeben erfolgreich einen autonomen Hintergrund-Agenten beauftragt, der sich dieses Thema über DeepSeek strukturiert aneignet. Bitte stelle mir die Frage in etwa einer Minute noch einmal!"
+        
+        return ChatCompletionResponse(
+            id=f"aether-{int(time.time())}",
+            created=int(time.time()),
+            model="aether-core",
+            choices=[ChatCompletionChoice(index=0, message=ChatMessage(role="assistant", content=response_text), finish_reason="stop")],
+            usage=ChatCompletionUsage(prompt_tokens=1, completion_tokens=30, total_tokens=31),
+        )
     # ----------------------------------
     
     context_emb = sm.get_context_for_question(entities, embedding_dim=n_cfg["d_model"]).to(device) if entities else None
