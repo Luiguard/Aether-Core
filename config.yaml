@@ -40,10 +40,10 @@ symbolic:
   use_rules: true
 training:
   batch_size: 16
-  epochs: 10
+  epochs: 5
   learning_rate: 0.0001
   log_dir: logs/
   output_dir: checkpoints/
-  save_every: 500
+  save_every: 50
 version: 1.0.0
 vram_gb: 12.0

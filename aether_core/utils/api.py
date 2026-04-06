@@ -25,10 +25,23 @@ from aether_core.symbolic.safety import SafetyLayer
 
 from fastapi.middleware.cors import CORSMiddleware
 
+from aether_core.utils.checkpoint import CheckpointManager
+
 app = FastAPI(title="Aether-Core OpenAI-Compatible API", version="1.0.0")
 
 LAST_INTERACTION_TIME = time.time()
 IS_TRAINING = False
+CKPT_MGR = CheckpointManager("checkpoints")
+
+def load_latest_weights():
+    """Lädt die neuesten Gewichte der Neural-Engine."""
+    global decoder, snc, ce
+    latest = CKPT_MGR.find_latest()
+    if latest:
+        print(f"[Aether-API] Lade Checkpoint: {latest}")
+        CKPT_MGR.load(latest, snc, decoder, ce)
+    else:
+        print("[Aether-API] Keine Checkpoints gefunden. Starte mit initialen Gewichten.")
 
 def run_distill_safe(epochs=20):
     global IS_TRAINING, LAST_INTERACTION_TIME
@@ -39,6 +52,8 @@ def run_distill_safe(epochs=20):
         sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
         from distill import distill
         distill("config.yaml", epochs)
+        # Nachdem Training fertig ist, Gewichte in-place reloaden
+        load_latest_weights()
     except Exception as e:
         print(f"[Training] Fehler: {e}")
     finally:
@@ -75,23 +90,41 @@ n_cfg = config["neural"]
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# --- Module laden ---
+# Module laden
 sm = SymbolicMemory(config["symbolic"]["graph_path"])
 entity_linker = EntityLinker(sm.graph)
 safety_layer = SafetyLayer(entity_linker)
+# Tokenizer laden (muss mit distill.py konsistent sein)
+merges_path = "aether_core/data/tokenizer_merges.json"
+tokenizer = AetherTokenizer(merges_path if os.path.exists(merges_path) else None)
 
-tokenizer = AetherTokenizer()  # Custom BPE
-
+# Falls Vokabular noch klein ist (keine Merges), Basis-Spec einhalten
 n_cfg = config["neural"]
 c_cfg = config["compression"]
 
-# Decoder (das Sprachmodul)
+# Die Neural-Engine besteht aus SNC, Decoder und CE
+snc = SparseCore(
+    vocab_size=tokenizer.vocab_size,
+    d_model=n_cfg["d_model"],
+    n_layers=n_cfg["n_layers"],
+    n_experts=n_cfg["moe"]["n_experts"],
+    top_k=n_cfg["moe"]["top_k"],
+).to(device)
+
 decoder = ChatDecoder(
     vocab_size=tokenizer.vocab_size,
     d_model=n_cfg["d_model"],
     n_layers=4,
     n_heads=n_cfg.get("n_heads", 12),
 ).to(device)
+
+ce = CompressionEngine(
+    input_dim=n_cfg["d_model"],
+    latent_dim=c_cfg["latent_dim"],
+).to(device)
+
+# Gewichte laden
+load_latest_weights()
 
 print(f"[Aether-API] Server bereit auf {device}. Vocab: {tokenizer.vocab_size}")
 
@@ -118,6 +151,8 @@ class ChatCompletionUsage(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    tokens_per_second: float = 0.0
+    elapsed_ms: float = 0.0
 
 class ChatCompletionResponse(BaseModel):
     id: str
@@ -196,6 +231,10 @@ async def trigger_distill(req: TrainRequest, background_tasks: BackgroundTasks):
     
     background_tasks.add_task(run_distill_safe, req.epochs)
     return {"status": "success", "message": f"Training (Epochen: {req.epochs}) gestartet. Log siehe Konsole."}
+
+@app.get("/v1/system/status")
+async def get_status():
+    return {"is_training": IS_TRAINING}
 
 # --- OpenAI-kompatible Endpunkte ---
 @app.get("/v1/models")
@@ -290,6 +329,7 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
     context_emb = sm.get_context_for_question(entities, embedding_dim=n_cfg["d_model"]).to(device) if entities else None
 
     # 4. Generieren
+    start_gen = time.time()
     generated_ids = decoder.generate(
         prompt_ids=prompt_tensor,
         max_new_tokens=request.max_tokens,
@@ -298,10 +338,15 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
         eos_token_id=tokenizer.eos_token_id,
         context_emb=context_emb,
     )
+    end_gen = time.time()
+    elapsed = max(end_gen - start_gen, 0.001)
 
     # 5. Nur die neuen Tokens decodieren
-    new_ids = generated_ids[len(prompt_ids):]
+    new_ids = generated_ids[len(prompt_ids[0]):]
+    completion_tokens = len(new_ids)
     response_text = tokenizer.decode(new_ids).strip()
+    
+    tokens_per_second = completion_tokens / elapsed
 
     # --- EXPERIMENTAL QUALITY CHECK (Weiteres Training nötig?) ---
     needs_training = False
@@ -328,7 +373,10 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
         needs_training = True
 
     if needs_training:
-        response_text += "\n\n⚠️ *(System-Hinweis: Die Neural-Engine zeigt Anzeichen von Untrainiertheit (Degeneration). Bitte im Einstellungen-Zahnrad den 'Trainer starten', um die Sprachstruktur weiter zu destillieren.)*"
+        if IS_TRAINING:
+            response_text += "\n\n⚙️ *(System-Update: Die Neural-Engine optimiert sich gerade autonom. Bitte hab einen Moment Geduld, die Sprachqualität verbessert sich in Kürze.)*"
+        else:
+            response_text += "\n\n⚠️ *(System-Hinweis: Die Neural-Engine zeigt Anzeichen von Untrainiertheit (Degeneration). Bitte im Einstellungen-Zahnrad den 'Trainer starten', um die Sprachstruktur weiter zu destillieren.)*"
 
     # 6. OpenAI-kompatible Antwort bauen
     return ChatCompletionResponse(
@@ -343,9 +391,11 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
             )
         ],
         usage=ChatCompletionUsage(
-            prompt_tokens=len(prompt_ids),
-            completion_tokens=len(new_ids),
-            total_tokens=len(prompt_ids) + len(new_ids),
+            prompt_tokens=len(prompt_ids[0]),
+            completion_tokens=completion_tokens,
+            total_tokens=len(prompt_ids[0]) + completion_tokens,
+            tokens_per_second=round(tokens_per_second, 2),
+            elapsed_ms=round(elapsed * 1000, 2),
         ),
     )
 

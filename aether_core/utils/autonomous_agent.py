@@ -38,25 +38,37 @@ class KnowledgeGapDetector:
             return random.choice(start_concepts)
             
         gaps = []
+        now = time.time()
         for node_id, data in nodes.items():
             name = data.get("name", node_id)
+            props = data.get("properties", {})
+            
+            # Innovation: Cooldown (2 Min) - Verhindert repetitives Lernen des Gleichen
+            last_updated = props.get("_ts", 0)
+            if now - last_updated < 120: # 2 Minuten
+                continue
+
             relations = len(data.get("relations", []))
-            facts = len([k for k in data.get("properties", {}).keys() if not k.startswith("_")])
+            facts = len([k for k in props.keys() if not k.startswith("_")])
             
             # Formel für Vollständigkeit. Weniger ist schlechter.
             score = relations * 2 + facts
             
-            # Wir suchen gezielt Knoten mit wenig Relationen/Fakten
             if score < 5:
                 gaps.append((score, name))
                 
         if not gaps:
-            # Alle bisherigen Konzepte sind 'voll'. Wähle ein zufälliges um es zu vertiefen.
-            node_id = random.choice(list(nodes.keys()))
+            # Cooldown auch beim Zufall berücksichtigen
+            available = [n for n, d in nodes.items() if now - d.get("properties", {}).get("_ts", 0) > 120]
+            if not available:
+                # Notfall: Nimm den ältesten Knoten
+                sorted_by_ts = sorted(nodes.items(), key=lambda x: x[1].get("properties", {}).get("_ts", 0))
+                node_id = sorted_by_ts[0][0]
+            else:
+                node_id = random.choice(available)
             return nodes[node_id].get("name", node_id)
             
-        # Wähle zufällig eins der am schlechtesten angebundenen Konzepte aus
-        # Sortiere aufsteigend nach score, nehme die Top 3 schwächsten, und wähle zufällig
+        # Wähle eines der 'schwächsten' aber nicht cooldown-behafteten Konzepte
         gaps.sort(key=lambda x: x[0])
         weakest = gaps[:3]
         return random.choice(weakest)[1]

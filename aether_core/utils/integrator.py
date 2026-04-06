@@ -124,6 +124,9 @@ Achte unbedingt darauf, dass keine Strings innerhalb des JSONs nicht geschlossen
                 res = self.req.post(f"{self.memory_api_url}/{endpoint}", json=payload)
                 if res.status_code == 200:
                     return True
+                elif res.status_code == 400 and "Konflikt" in res.text:
+                    # Knoten existiert bereits, völlig ok im autonomen Betrieb
+                    return True
                 else:
                     print(f"WARN: API {endpoint} ({res.status_code}) - {res.text}")
                     return False
