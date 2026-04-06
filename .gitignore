@@ -1,0 +1,23 @@
+.env
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+venv_aether/
+.venv*
+.pytest_cache/
+*.log
+
+# Aether Neural Network Checkpoints / Tensors
+checkpoints/
+*.pt
+*.safetensors
+*.ckpt
+
+# Aether Symbolic Graph Persistenz
+aether_core/data/*.json
+training_data.json
