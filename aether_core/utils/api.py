@@ -77,7 +77,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # --- Module laden ---
 sm = SymbolicMemory(config["symbolic"]["graph_path"])
-entity_linker = EntityLinker(sm)
+entity_linker = EntityLinker(sm.graph)
 safety_layer = SafetyLayer(entity_linker)
 
 tokenizer = AetherTokenizer()  # Custom BPE
